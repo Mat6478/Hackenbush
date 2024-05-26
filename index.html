@@ -1,7 +1,6 @@
 <!DOCTYPE html>
 <meta charset="utf-8">
 <svg width="960" height="600"></svg>
-<div id='button'>Freeze</div>
 
 <script src="https://d3js.org/d3.v4.min.js"></script>
 <!-- <script src="d3.v4.min.js"></script> -->
@@ -13,17 +12,9 @@
 	let color = 0;
 	var nodeArray = [];
 	let nextNodeId = 1;
-//	var groundNodes = [];
 	var stickArray = [];
-	let nextStickId = 1;
+	let nextStickId = 0;
 	var branchArray = []
-
-
-function link(from, to, color){
-	var stick = {id: nextStickId++, source: from, target: to, 
-		color: color || 'blue'}
-	stickArray.push(stick);
-}
 
 function isGrounded(n){
 	return n.nodeType == 'ground'
@@ -54,35 +45,57 @@ function createNode(id, type)
 	}
 	return node;
 }
+
+function createStick(id, from, to, color)
+{
+	var stick = 
+	{
+		stickId: id,
+		source: from,
+		target: to, 
+		color: color || 'blue',
+		branch: {}
+		};
+	stickArray.push(stick);
+	return stick;
+}
+
 function defineBranch(m, n)
 {
-	console.log('makeBranch', m, n)
 	var branchInfo = { 
+		branchId: nextNodeId-2,
 		nodesConnected: [m, n],
-		baseNodeId: null,
-		potentialNodeId: null,
+		baseNode: {},
+		potentialNode: {},
+		stick: {},
 		supportedBranches: [],
 		supportingBranches: [],
-		stepsToGround: 0,
+	//	stepsToGround: 0,
 	};
+	console.log('defineBranch', branchInfo)
 
 	return branchInfo;
 }
 function growBranch(existingNode) {
-	var newId = nextNodeId++;
-	console.log('add', newId, 'at', existingNode.nodeId);
-	var newNode = createNode(newId, ''); 
-	link(existingNode, newNode, 'green');
+	var newNodeId = nextNodeId++;
+	var newStickId = nextStickId++;
+	console.log('add', newNodeId, 'to', existingNode.nodeId);
+	var newNode = createNode(newNodeId, ''); 
+	var newStick = createStick(nextStickId, existingNode, newNode, 'green');
 	var newBranch = defineBranch(existingNode, newNode);
-	newBranch.potentialNodeId = newNode.nodeId;
-	newBranch.baseNodeId = existingNode.nodeId;
-	var sourceBranches = branchArray.filter(branch => branch.potentialNodeId == existingNode);
-	newBranch.supportingBranches.push(sourceBranches);
-	existingNode.branchesAbovePotential.push(newBranch)
-	sourceBranches.forEach(branch => branch.supportedBranches.push(newBranch));
+	newStick.branch = newBranch;
+	newBranch.potentialNode = newNode;
+	newBranch.baseNode = existingNode;
+	newBranch.stick = newStick;
+	branchArray.push(newBranch);
+	var sourceBranches = existingNode.nodeType == 'ground' ? ['ground'] : branchArray.filter(branch => branch.potentialNode == existingNode);
+//	newBranch.supportingBranches.push(sourceBranches);
+//	newBranch.supportingBranches = sourceBranches;
+	newBranch.supportingBranches = newBranch.supportingBranches.concat(sourceBranches);
+	existingNode.branchesAbovePotential.push(newBranch);
+	if(existingNode.type == 'ground') {sourceBranches.forEach(branch => branch.supportedBranches.push(newBranch))};
 	existingNode.branchesBelowBase = [...existingNode.branchesBelowBase, ... sourceBranches];
 	colorNode(existingNode);
-	console.log(newBranch)
 }
 function addBase() {
 	let nextBase = nextNodeId++; 
@@ -92,31 +105,41 @@ function addBase() {
 }
 
 function removeBranch(branch) {
-	console.log(branch);
-	stickArray.splice(stickArray.indexOf(branch), 1);
+	if(branch.source)	//input is a link
+	{
+		var link = branch;
+		console.log('link', link);
+		branch = link.branch;
+	}
+	console.log('removed branch:', branch);
+	stickArray = stickArray.filter(stick => stick != branch.stick);
 	nodeArray.forEach(n => n.branchesBelowBase = n.branchesBelowBase.filter(b => b!= branch));
 	nodeArray.forEach(n => n.branchesAbovePotential = n.branchesAbovePotential.filter(b => b!= branch));
 	nodeArray = nodeArray.filter(
 		n => 
 		n.nodeType != 'ground' && n.branchesBelowBase.length > 0
-		|| n.nodeType != 'ground' && n.branchesAbovePotential == 0 && n.nodeId != branch.potentialNodeId
-		|| n.nodeType === 'ground' && n.nodeId != branch.baseNodeId
+		|| n.nodeType != 'ground' && n.branchesAbovePotential == 0 && n != branch.potentialNode
+		|| n.nodeType === 'ground' && n != branch.baseNode
 	);
-	branchArray.forEach(branch => branch.supportedBranches = branch.supportedBranches.filter(n => n != branch));
-	branchArray.forEach(branch => branch.supportingBranches = branch.supportingBranches.filter(n => n != branch));	
+	console.log('branchArray before:', branchArray);
+	branchArray = branchArray.filter(b => b!= branch);
+	branchArray.forEach(b => b.supportedBranches = b.supportedBranches.filter(br => br != branch));
+	branchArray.forEach(b => b.supportingBranches = b.supportingBranches.filter(br => br != branch));
+	console.log('branchArray after', branchArray);
 	nodeArray.forEach(colorNode);
 	var removedBranches = branchArray.filter(branch => branch.supportingBranches.length == 0);
 	removedBranches.forEach(removeBranch)
 	updateSimulation();
 }
 
-function colorBranch(branch) {
-	console.log('color', branch.color);
-	branch.color = branch.color == 'red' ? 'blue' : 
-		branch.color == 'blue' ? 'green' : 
+function colorStick(stick) {
+
+	console.log('color', stick.color, stick);
+	stick.color = stick.color == 'red' ? 'blue' : 
+		stick.color == 'blue' ? 'green' : 
 		'red';
-	d3.select(`#b${branch.id}`)
-		.attr('stroke', branch.color)
+	d3.select(`#b${stick.stickId}`)
+		.attr('stroke', stick.color)
 }
 
 function colorNode(node) {
@@ -156,18 +179,18 @@ function updateGraph(nodes) {
 
   // links
   linkElements = linkGroup.selectAll('line')
-    .data(stickArray, x => x.id)
+    .data(stickArray, x => x.stickId)
 
   linkElements.exit().transition()
     .duration(1111).attr('y1', height).attr('y2', height)
     .style('opacity', 0).remove()
 
   var linkEnter = linkElements
-    .enter().append('line').attr("id", d => 'b'+d.id)
+    .enter().append('line').attr("id", d => 'b'+d.stickId)
     .attr('stroke-width', 6)
     .attr('stroke', x => x.color || 'red')
 	.on('dblclick', removeBranch)
-	.on('click', colorBranch)
+	.on('click', colorStick)
 
   linkElements = linkEnter.merge(linkElements)
   
@@ -211,7 +234,7 @@ function updateGraph(nodes) {
 
 // simulation setup with all forces
 var linkForce = d3.forceLink()
-  .id(function (link) { return link.id })
+  .id(function (link) { return link.stickId })
 //  .strength(function (link) { return 1; })
 
 var simulation = d3.forceSimulation().force('link', linkForce)
@@ -288,16 +311,4 @@ function updateSimulation() {
 addBase();
 // trigger the initial render
 updateSimulation();
-
-	d3.select('#button').on('click', function(d) {
-		color+=1;
-//		console.log(color);
-		console.log(nodeArray.map(x=>x.nodeId));
-		console.log(stickArray.map(x=>x.source.id));
-		console.log(stickArray.map(x=>x.target.id));
-//		updateSimulation();
-//		simulation.alphaTarget(0.7).restart()
-		simulation.stop();
-	});
-
 </script>
