@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<svg width="960" height="600"></svg>
+<div id='button'>Freeze</div>
+
+<script src="https://d3js.org/d3.v4.min.js"></script>
+<!-- <script src="d3.v4.min.js"></script> -->
+<script>
+	var width = .9*window.innerWidth
+	var height = .9*window.innerHeight
+	var ground = .9*height;
+
+	let color = 0;
+	var nodeArray = [];
+	let nextNodeId = 1;
+//	var groundNodes = [];
+	var stickArray = [];
+	let nextStickId = 1;
+	var branchArray = []
+
+
+function link(from, to, color){
+	var stick = {id: nextStickId++, source: from, target: to, 
+		color: color || 'blue'}
+	stickArray.push(stick);
+}
+
+function isGrounded(n){
+	return n.nodeType == 'ground'
+}
+function isGroundedBranch(m, n){
+	return m.nodeType == 'ground' || n.nodeType == 'ground';
+}
+function isSupportingNode(n){
+	return n.branchesAbovePotential.length>0;
+}
+function isSupportedNode(n){
+	return n.branchesBelowBase.length;
+}
+
+function createNode(id, type)
+{
+	const node = {
+		nodeId: id,
+		nodeType: type,
+		branchesBelowBase: [],
+		branchesAbovePotential: [],
+	};
+	nodeArray.push(node);
+	if (type ==='ground'){
+		node.fy = ground;
+		node.fx = width / 4;
+		node.branchesBelowBase = ['ground']
+	}
+	return node;
+}
+function defineBranch(m, n)
+{
+	console.log('makeBranch', m, n)
+	var branchInfo = { 
+		nodesConnected: [m, n],
+		baseNodeId: null,
+		potentialNodeId: null,
+		supportedBranches: [],
+		supportingBranches: [],
+		stepsToGround: 0,
+	};
+
+	return branchInfo;
+}
+function growBranch(existingNode) {
+	var newId = nextNodeId++;
+	console.log('add', newId, 'at', existingNode.nodeId);
+	var newNode = createNode(newId, ''); 
+	link(existingNode, newNode, 'green');
+	var newBranch = defineBranch(existingNode, newNode);
+	newBranch.potentialNodeId = newNode.nodeId;
+	newBranch.baseNodeId = existingNode.nodeId;
+	var sourceBranches = branchArray.filter(branch => branch.potentialNodeId == existingNode);
+	newBranch.supportingBranches.push(sourceBranches);
+	existingNode.branchesAbovePotential.push(newBranch)
+	sourceBranches.forEach(branch => branch.supportedBranches.push(newBranch));
+	existingNode.branchesBelowBase = [...existingNode.branchesBelowBase, ... sourceBranches];
+	colorNode(existingNode);
+	console.log(newBranch)
+}
+function addBase() {
+	let nextBase = nextNodeId++; 
+	var newNode = createNode(nextBase, 'ground');
+	growBranch(newNode);
+	updateSimulation();
+}
+
+function removeBranch(branch) {
+	console.log(branch);
+	stickArray.splice(stickArray.indexOf(branch), 1);
+	nodeArray.forEach(n => n.branchesBelowBase = n.branchesBelowBase.filter(b => b!= branch));
+	nodeArray.forEach(n => n.branchesAbovePotential = n.branchesAbovePotential.filter(b => b!= branch));
+	nodeArray = nodeArray.filter(
+		n => 
+		n.nodeType != 'ground' && n.branchesBelowBase.length > 0
+		|| n.nodeType != 'ground' && n.branchesAbovePotential == 0 && n.nodeId != branch.potentialNodeId
+		|| n.nodeType === 'ground' && n.nodeId != branch.baseNodeId
+	);
+	branchArray.forEach(branch => branch.supportedBranches = branch.supportedBranches.filter(n => n != branch));
+	branchArray.forEach(branch => branch.supportingBranches = branch.supportingBranches.filter(n => n != branch));	
+	nodeArray.forEach(colorNode);
+	var removedBranches = branchArray.filter(branch => branch.supportingBranches.length == 0);
+	removedBranches.forEach(removeBranch)
+	updateSimulation();
+}
+
+function colorBranch(branch) {
+	console.log('color', branch.color);
+	branch.color = branch.color == 'red' ? 'blue' : 
+		branch.color == 'blue' ? 'green' : 
+		'red';
+	d3.select(`#b${branch.id}`)
+		.attr('stroke', branch.color)
+}
+
+function colorNode(node) {
+	var color = isGrounded(node) ? 'black' :
+		isSupportingNode(node) ? 'lightgrey' : 'white';
+	d3.select(`#n${node.nodeId}`)
+		.attr('fill', color)
+}
+
+var svg = d3.select('svg');
+svg.attr('width', width).attr('height', height);
+
+var linkElements, nodeElements, textElements;
+
+// we use svg groups to logically group the elements together
+var baseGroup = svg.append('g').attr('class', 'base')
+var linkGroup = svg.append('g').attr('class', 'branch')
+var nodeGroup = svg.append('g').attr('class', 'node')
+//var textGroup = svg.append('g').attr('class', 'texts')
+
+// select node is called on every click
+function selectNode(selectedNode) {
+//	console.log('before', nodes);
+	growBranch(selectedNode)
+//	console.log('after', nodes);
+	updateSimulation();
+}
+
+function updateGraph(nodes) {
+  groundLine = baseGroup.selectAll('line').data([0])
+  .enter().append('line')
+    .attr('stroke-width', 3)
+    .attr('stroke', 'black')
+	.attr('x1', 0).attr('y1', ground)
+	.attr('x2', width).attr('y2', ground)
+	.on('click', addBase)
+
+  // links
+  linkElements = linkGroup.selectAll('line')
+    .data(stickArray, x => x.id)
+
+  linkElements.exit().transition()
+    .duration(1111).attr('y1', height).attr('y2', height)
+    .style('opacity', 0).remove()
+
+  var linkEnter = linkElements
+    .enter().append('line').attr("id", d => 'b'+d.id)
+    .attr('stroke-width', 6)
+    .attr('stroke', x => x.color || 'red')
+	.on('dblclick', removeBranch)
+	.on('click', colorBranch)
+
+  linkElements = linkEnter.merge(linkElements)
+  
+  // nodes
+  nodeElements = nodeGroup.selectAll('circle')
+    .data(nodes, function (node) { return node.nodeId })
+  nodeElements.exit().transition()
+    .duration(1111).attr('cy', height)
+    .style('opacity', 0).remove()
+  var nodeEnter = nodeElements
+    .enter()
+    .append('circle')
+    .attr('stroke',  'grey')
+	.attr("id", n => 'n' + n.nodeId)
+    .attr('r', 8)
+//    .attr('cx', n => width)
+//    .attr('cy', n => n.x ?? height/2)
+    .attr('fill',  n => isGrounded(n) ? 'black' : 'white')
+	//	isSupportingNode(n) ? 'lightgrey' : 'white')
+    .call(dragDrop)
+    // call selectNode method on every click
+    .on('click', selectNode)
+
+  nodeElements = nodeEnter.merge(nodeElements)
+
+  // texts
+//  textElements = textGroup.selectAll('text')
+//    .data(nodes, function (node) { return node.nodeId })
+
+//  textElements.exit().remove()
+
+//   var textEnter = textElements
+//     .enter().append('text')
+//     .text(function (node) { return node.label })
+//     .attr('font-size', 10)
+//     .attr('dx', 10)
+//     .attr('dy', 4)
+
+//   textElements = textEnter.merge(textElements)
+}
+
+// simulation setup with all forces
+var linkForce = d3.forceLink()
+  .id(function (link) { return link.id })
+//  .strength(function (link) { return 1; })
+
+var simulation = d3.forceSimulation().force('link', linkForce)
+// force along horizontal direction
+//  .force('x', d3.forceX().x(function(d) { return 662; }))
+
+// force along vertical direction
+.force('y', d3.forceY().y(function(d) { return 0; }))
+
+//.force('repel', d3.forceManyBody().strength(-5)) // repel
+.force('collision', d3.forceCollide().radius(22))
+
+//.force('center', d3.forceCenter(width/2, height/2))
+
+var dragDrop = d3.drag().on('start', function (node) {
+//	d3.select(this).classed("fixed", node.fixed = false);
+  node.fx = node.x
+  node.fy = node.y
+}).on('drag', function (node) {
+  simulation.alphaTarget(0.7).restart()
+  node.fx = d3.event.x
+  node.fy = d3.event.y
+  var distance = d3.event.y - ground
+  const delta = 13
+  if(distance < delta && distance > -delta)
+  {
+	//makeBase(node.nodeId);
+	if(!isGrounded(node)) node.nodeType = 'ground'; //todo: move to function
+	colorNode(node);
+	node.fy = ground;
+  } else
+  {
+	if(isGrounded(node)) 
+	{
+		node.nodeType = '';
+		colorNode(node);
+	}
+  }
+}).on('end', function (node) {
+	console.log(node);
+ if (!d3.event.active) {
+   simulation.alphaTarget(0.7)
+ }
+// make this node back to floating instead of fixed position
+//  node.fx = null
+//  node.fy = null
+})
+
+	
+function updateSimulation() {
+
+  updateGraph(nodeArray)
+
+  simulation.nodes(nodeArray)
+  .on('tick', () => {
+    nodeElements
+//	.attr('cx', function (node) { return node.nodeId ? node.x : width/2})
+//      .attr('cy', function (node) { return node.nodeId ? node.y : ground })
+      .attr('cx', function (node) { return node.x })
+      .attr('cy', function (node) { return node.y  })
+    // textElements
+    //   .attr('x', function (node) { return node.x })
+    //   .attr('y', function (node) { return node.y })
+    linkElements
+      .attr('x1', function (link) { return link.source.x })
+      .attr('y1', function (link) { return link.source.y })
+      .attr('x2', function (link) { return link.target.x })
+      .attr('y2', function (link) { return link.target.y })
+  })
+
+  simulation.force('link').links(stickArray)
+  simulation.alphaTarget(0.9).restart()
+}
+addBase();
+// trigger the initial render
+updateSimulation();
+
+	d3.select('#button').on('click', function(d) {
+		color+=1;
+//		console.log(color);
+		console.log(nodeArray.map(x=>x.nodeId));
+		console.log(stickArray.map(x=>x.source.id));
+		console.log(stickArray.map(x=>x.target.id));
+//		updateSimulation();
+//		simulation.alphaTarget(0.7).restart()
+		simulation.stop();
+	});
+
+</script>
